@@ -12,40 +12,46 @@
     const VERSION_MANIFEST_URL = "https://kingelytra1.github.io/Pocket-Block-Realms-2/version.json";
     const CURRENT_VERSION = "2.4.0"; // Keep this as your local app version
 
-    async function backgroundUpdateCheck() {
-        try {
-            let response = await fetch(VERSION_MANIFEST_URL + "?t=" + Date.now());
-            if (!response.ok) return;
-            let data = await response.json();
-
-            if (data.version !== CURRENT_VERSION) {
-                let codeResponse = await fetch(data.url);
-                let newHtmlContent = await codeResponse.text();
-                
-                // Save it for the next launch
-                localStorage.setItem("cached_game_html", newHtmlContent);
-                localStorage.setItem("cached_version", data.version);
-            }
-        } catch (error) {
-            console.log("No internet or offline mode");
-        }
-    }
-
-    window.onload = async () => {
+    async function initGame() {
         let cachedHtml = localStorage.getItem("cached_game_html");
-        
-        // Use sessionStorage to ensure it only loads the cache ONCE per app launch
-        if (cachedHtml && !sessionStorage.getItem("cache_loaded")) {
-            sessionStorage.setItem("cache_loaded", "true");
+        let runningCached = localStorage.getItem("is_running_cached");
+
+        // 1. If we have a cached version and aren't running it yet, load it ONCE smoothly
+        if (cachedHtml && !runningCached) {
+            localStorage.setItem("is_running_cached", "true");
             document.open();
             document.write(cachedHtml);
             document.close();
             return;
         }
 
-        // Run background check for future updates
-        backgroundUpdateCheck();
-    };
+        // 2. Otherwise, check GitHub silently in the background while the loading screen shows
+        checkForUpdatesInBackground();
+    }
+
+    async function checkForUpdatesInBackground() {
+        try {
+            let response = await fetch(VERSION_MANIFEST_URL + "?t=" + Date.now());
+            if (!response.ok) return;
+            let data = await response.json();
+
+            let activeVersion = localStorage.getItem("cached_version") || CURRENT_VERSION;
+
+            if (data.version !== activeVersion) {
+                let codeResponse = await fetch(data.url);
+                let newHtmlContent = await codeResponse.text();
+                
+                // Save for the next time the user opens the app
+                localStorage.setItem("cached_game_html", newHtmlContent);
+                localStorage.setItem("cached_version", data.version);
+                localStorage.removeItem("is_running_cached"); // Reset flag so next launch loads the new cache
+            }
+        } catch (error) {
+            console.log("Running completely offline - using local/cached version");
+        }
+    }
+
+    window.onload = initGame;
 </script>
 <style>
 html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #0f172a; font-family: 'Fredoka', sans-serif; }
@@ -55,8 +61,14 @@ canvas { display: block; touch-action: none; width: 100%; height: 100%; }
 @keyframes shake { 0%{transform:translateX(0)} 20%{transform:translateX(-5px)} 40%{transform:translateX(5px)} 60%{transform:translateX(-3px)} 80%{transform:translateX(3px)} 100%{transform:translateX(0)} }
 @keyframes cutPulse { 0%,100%{opacity:.55;transform:scale(1)} 50%{opacity:1;transform:scale(1.04)} }
 @keyframes titleIn { 0%{opacity:0;transform:translateY(18px) scale(.96)} 100%{opacity:1;transform:translateY(0) scale(1)} }
+@keyframes loadPulse { 0%,100%{opacity:.7;transform:scale(1)} 50%{opacity:1;transform:scale(1.03)} }
+@keyframes loadShimmer { 0%{background-position:0% 50%} 100%{background-position:200% 50%} }
+@keyframes loadSpin { to{transform:rotate(360deg)} }
 .cut-pulse { animation: cutPulse 1.6s ease-in-out infinite; }
 .title-in { animation: titleIn .7s ease-out both; }
+.load-pulse { animation: loadPulse 1.4s ease-in-out infinite; }
+.load-bar-fill { background: linear-gradient(90deg,#0ea5e9,#34d399,#a78bfa,#0ea5e9); background-size: 200% 100%; animation: loadShimmer 1.2s linear infinite; }
+.load-orb { animation: loadSpin 2.4s linear infinite; }
 .control-btn { width: 56px; height: 56px; border-radius: 14px; font-weight: 700; font-size: 13px; color: #ececec; background: rgba(30, 41, 59, 0.9); border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 4px 0 rgba(0,0,0,0.35); transition: all 120ms; display: flex; align-items: center; justify-content: center; }
 .control-btn:active, .control-btn.active { transform: translateY(2px); box-shadow: 0 1px 0 rgba(0,0,0,0.35); background: rgba(51, 65, 85, 1); }
 .inv-item { transition: all 0.2s; border: 2px solid transparent; }
@@ -128,7 +140,32 @@ input[type="color"]::-webkit-color-swatch { border: 2px solid rgba(255,255,255,0
   <canvas id="gameCanvas" width="719" height="1094" style="width: 359.5px; height: 547px;"></canvas>
   <div id="ui-layer" class="absolute top-0 left-0 w-full h-full z-50 pointer-events-none" style="transform: scale(1); transform-origin: left top; width: 100%; height: 100%;">
 
-    <div id="device-select-screen" class="absolute inset-0 flex flex-col items-center justify-center z-[200] pointer-events-auto" style="background:linear-gradient(160deg,#0f172a 0%,#1e3a5f 45%,#0f172a 100%);">
+    <div id="loading-screen" class="absolute inset-0 flex flex-col items-center justify-center z-[210] pointer-events-auto" style="background:linear-gradient(165deg,#0b1224 0%,#0f172a 35%,#12304a 70%,#0f172a 100%);">
+      <div class="absolute inset-0 opacity-40 pointer-events-none" style="background:radial-gradient(ellipse at 50% 28%,rgba(56,189,248,0.28),transparent 55%),radial-gradient(ellipse at 20% 80%,rgba(167,139,250,0.18),transparent 45%),radial-gradient(ellipse at 85% 75%,rgba(52,211,153,0.14),transparent 50%);"></div>
+      <div class="absolute inset-0 pointer-events-none opacity-20" style="background-image:linear-gradient(rgba(148,163,184,0.08) 1px,transparent 1px),linear-gradient(90deg,rgba(148,163,184,0.08) 1px,transparent 1px);background-size:28px 28px;"></div>
+      <div class="relative z-10 flex flex-col items-center gap-5 w-[88%] max-w-sm px-2">
+        <div class="load-orb w-16 h-16 rounded-2xl border-2 border-cyan-400/60 flex items-center justify-center shadow-lg" style="box-shadow:0 0 28px rgba(56,189,248,0.35);">
+          <div class="text-3xl">🧱</div>
+        </div>
+        <div class="text-center title-in">
+          <h1 class="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-br from-cyan-300 via-sky-300 to-violet-400 drop-shadow-lg" style="line-height:1.15;">Pocket Block Realms</h1>
+          <p class="text-[11px] text-cyan-200/90 font-bold tracking-widest uppercase mt-1">2.4 · Loading Worlds</p>
+        </div>
+        <div class="w-full glass rounded-2xl p-4 border border-cyan-500/30">
+          <div class="flex justify-between items-center mb-2">
+            <span id="loading-status" class="text-xs font-bold text-slate-300">Booting engine…</span>
+            <span id="loading-pct" class="text-xs font-bold text-cyan-300 tabular-nums">0%</span>
+          </div>
+          <div class="w-full h-3 rounded-full bg-slate-800/90 border border-slate-600/60 overflow-hidden">
+            <div id="loading-bar" class="load-bar-fill h-full rounded-full" style="width:0%;"></div>
+          </div>
+          <p id="loading-tip" class="load-pulse text-[10px] text-slate-400 mt-3 text-center font-bold">Tip: Craft a backpack for more inventory slots</p>
+        </div>
+        <p class="text-[10px] text-slate-500 font-bold tracking-wide">Preparing device select…</p>
+      </div>
+    </div>
+
+    <div id="device-select-screen" class="absolute inset-0 flex flex-col items-center justify-center z-[200] pointer-events-auto hidden" style="background:linear-gradient(160deg,#0f172a 0%,#1e3a5f 45%,#0f172a 100%);">
       <div class="absolute inset-0 opacity-30 pointer-events-none" style="background:radial-gradient(ellipse at 50% 20%,rgba(56,189,248,0.25),transparent 55%),radial-gradient(ellipse at 80% 80%,rgba(52,211,153,0.15),transparent 50%);"></div>
       <div class="glass rounded-3xl p-6 text-center w-80 shadow-2xl border border-blue-500/40 flex flex-col gap-4 relative z-10">
         <div>
@@ -239,7 +276,7 @@ input[type="color"]::-webkit-color-swatch { border: 2px solid rgba(255,255,255,0
         </div>
         <div class="glass rounded-xl p-2 flex gap-2 overflow-x-auto items-center justify-between">
           <div class="flex gap-2">
-            <button id="single-player-btn" class="px-3 py-1 rounded bg-slate-700 text-white text-xs font-bold whitespace-nowrap border border-slate-600 min-h-[44px]">🌏Worlds</button>
+            <button id="single-player-btn" class="px-3 py-1 rounded bg-slate-700 text-white text-xs font-bold whitespace-nowrap border border-slate-600 min-h-[44px]">Worlds</button>
             <button id="craft-btn" class="px-3 py-1 rounded bg-amber-700 text-white text-xs font-bold whitespace-nowrap border border-amber-600 min-h-[44px]">CRAFT</button>
             <button id="shop-btn" class="px-3 py-1 rounded bg-yellow-600 text-white text-xs font-bold whitespace-nowrap border border-amber-400/50 min-h-[44px]">🛒 SHOP</button>
             <button id="village-btn" class="px-3 py-1 rounded bg-green-700 text-white text-xs font-bold whitespace-nowrap border border-green-600 min-h-[44px]">VILLAGE</button>
@@ -580,6 +617,11 @@ const vChatBtn=document.getElementById('v-chat-btn'),vFollowBtn=document.getElem
 const mainMenuReturnBtn=document.getElementById('main-menu-return-btn');
 const villageFollowAllBtn=document.getElementById('village-follow-all-btn');
 const villageVillagersList=document.getElementById('village-villagers-list');
+const loadingScreen=document.getElementById('loading-screen');
+const loadingBar=document.getElementById('loading-bar');
+const loadingPct=document.getElementById('loading-pct');
+const loadingStatus=document.getElementById('loading-status');
+const loadingTip=document.getElementById('loading-tip');
 const deviceSelectScreen=document.getElementById('device-select-screen');
 const introCutscene=document.getElementById('intro-cutscene');
 const devicePcBtn=document.getElementById('device-pc-btn');
@@ -604,6 +646,7 @@ const scoreRow=document.getElementById('score-row');
 const makerSavePanel=document.getElementById('maker-save-panel');
 
 const TILE=24,GRAVITY=1100,TERMINAL_VELOCITY=800,DAY_SECONDS=1800;
+const LOADING_DURATION_MS=5500;
 const BASE_INV_SLOTS=16;
 const ORES=['coal','aluminum','iron','gold','lapis','redstone','diamond','emerald','ruby','sapphire','crystals','obsidian','quartz_ore'];
 const GARAGE_DOORS=['garage_door_2','garage_door_3','garage_door_4'];
@@ -896,7 +939,7 @@ const ACHIEVEMENTS=[
   {id:'mod_maker',name:'Garage Engineer',desc:'Open Mod Maker and save a custom mod',prize:70,icon:'🔧',check:s=>s.makerSaves>=1}
 ];
 
-let cw=360,ch=640,dpr=1,initialized=false,gameState='DEVICE_SELECT',lastTime=0,currentVkbText='',vkbMode='world',editingWorldIndex=-1,editingVillagerIndex=-1;
+let cw=360,ch=640,dpr=1,initialized=false,gameState='LOADING',lastTime=0,currentVkbText='',vkbMode='world',editingWorldIndex=-1,editingVillagerIndex=-1;
 let myPlayerId='p_'+Math.random().toString(36).substr(2,9);
 let myPlayerColor='#'+Math.floor(Math.random()*16777215).toString(16).padStart(6,'0');
 let myPlayerName='Player_'+Math.floor(Math.random()*1000);
@@ -904,6 +947,25 @@ let currentAccount=null,currentInteractingVillager=null,deviceChosen=false,input
 let pendingElevator={wx:0,wy:0,floors:[],design:'standard'};
 let pendingBillboard={wx:0,wy:0,kind:'billboard',text:'AD SPACE'};
 let elevatorRideInputLockUntil=0;
+let loadingStartTs=0,loadingDone=false,loadingRaf=0;
+const LOADING_TIPS=[
+  'Tip: Craft a backpack for more inventory slots',
+  'Tip: City elevators need 2+ floor Y values',
+  'Tip: Match teleporter PINs 1–9 to link portals',
+  'Tip: World Editor lets you fly and build freely',
+  'Tip: Mod Maker builds custom cars & billboards',
+  'Tip: Sleep in a bed only at night to skip time'
+];
+const LOADING_STEPS=[
+  {t:0,msg:'Booting engine…'},
+  {t:0.12,msg:'Loading biomes & ores…'},
+  {t:0.28,msg:'Warming audio buffers…'},
+  {t:0.45,msg:'Assembling block palette…'},
+  {t:0.62,msg:'Syncing shop & mods…'},
+  {t:0.78,msg:'Calibrating UI scale…'},
+  {t:0.92,msg:'Almost ready…'},
+  {t:1,msg:'Ready!'}
+];
 function isInputLocked(){return performance.now()<inputLockUntil;}
 function isElevatorRideInputLocked(){return performance.now()<elevatorRideInputLockUntil;}
 function armElevatorRideInputLock(ms){
@@ -1336,7 +1398,7 @@ function setShopTab(tab){shopTab=tab;document.querySelectorAll('.shop-tab').forE
 
 function ensureAudioBuffers(){SFX_IDS.forEach(id=>{const el=document.getElementById(id);if(!el||!el.src)return;fetch(el.src).then(r=>r.arrayBuffer()).then(b=>audioCtx.decodeAudioData(b)).then(d=>{audioBank[id]=d;}).catch(()=>{});});}
 function playSfx(id,pitch=1){if(!runtime.audioUnlocked)return;const buf=audioBank[id];if(buf){const src=audioCtx.createBufferSource(),gain=audioCtx.createGain();gain.gain.value=id==='sfx_step'?0.2:(id==='sfx_mine'?0.3:0.5);src.playbackRate.value=pitch*(0.9+Math.random()*0.2);src.buffer=buf;src.connect(gain);gain.connect(audioCtx.destination);src.start(0);}else{try{const o=audioCtx.createOscillator(),g=audioCtx.createGain();o.frequency.value=440*pitch;g.gain.value=0.08;o.connect(g);g.connect(audioCtx.destination);o.start();o.stop(audioCtx.currentTime+0.08);}catch(_){}}}
-function unlockAudio(){if(runtime.audioUnlocked)return;runtime.audioUnlocked=true;audioCtx.resume().catch(()=>{});if(gameState==='MAIN_MENU'||gameState==='DEVICE_SELECT'||gameState==='CUTSCENE')bgmMenu.play().catch(()=>{});else bgmDay.play().catch(()=>{});bgmNight.play().catch(()=>{});bgmCave.play().catch(()=>{});bgmNether.play().catch(()=>{});bgmOcean.play().catch(()=>{});bgmShop.play().catch(()=>{});if(bgmCity)bgmCity.play().catch(()=>{});if(bgmModMaker)bgmModMaker.play().catch(()=>{});}
+function unlockAudio(){if(runtime.audioUnlocked)return;runtime.audioUnlocked=true;audioCtx.resume().catch(()=>{});if(gameState==='MAIN_MENU'||gameState==='DEVICE_SELECT'||gameState==='CUTSCENE'||gameState==='LOADING')bgmMenu.play().catch(()=>{});else bgmDay.play().catch(()=>{});bgmNight.play().catch(()=>{});bgmCave.play().catch(()=>{});bgmNether.play().catch(()=>{});bgmOcean.play().catch(()=>{});bgmShop.play().catch(()=>{});if(bgmCity)bgmCity.play().catch(()=>{});if(bgmModMaker)bgmModMaker.play().catch(()=>{});}
 function vibrate(style){if(!runtime.settings.enableVibration)return;window.webkit?.messageHandlers?.rezonaBridge?.postMessage({action:'vibrate',requestId:'h5-'+Date.now(),version:'1.0',params:{style}});}
 function hashInt(x,y,seed){let n=(x*374761393+y*668265263+seed*2246822519)|0;n=(n^(n>>>13))*1274126177;return((n^(n>>>16))>>>0)/4294967295;}
 function stringToSeed(str){let h=0;for(let i=0;i<str.length;i++)h=Math.imul(31,h)+str.charCodeAt(i)|0;return h;}
@@ -1681,22 +1743,64 @@ if(GADGET_ITEMS.has(footBase)||footBase==='jump_pad'||footBase==='starter_pad'||
 }
 const sy=runtime.dimension==='nether'?0:surfaceY(Math.floor(p.x/TILE));if(!runtime.isCreative&&!runtime.worldEditor&&p.y>(sy+300)*TILE)p.hp-=100*dt;if(!runtime.isCreative&&!runtime.worldEditor){p.hunger=Math.max(0,p.hunger-dt*0.5);if(p.hunger<=0)p.hp-=dt*2;}const depth=Math.max(0,Math.floor(p.y/TILE)-sy);if(depth>(runtime.achievements.stats.maxDepth||0)){runtime.achievements.stats.maxDepth=depth;checkAchievements();}}
 function spawnEntities(){if(runtime.worldEditor||runtime.modMaker)return;const isDay=runtime.timeOfDay>=0.25&&runtime.timeOfDay<0.75;for(let i=runtime.monsters.length-1;i>=0;i--){if(Math.abs(runtime.monsters[i].x-runtime.player.x)>cw*1.5)runtime.monsters.splice(i,1);}for(let i=runtime.animals.length-1;i>=0;i--){if(Math.abs(runtime.animals[i].x-runtime.player.x)>cw*1.5&&!runtime.animals[i].tamed&&!(runtime.animals[i] instanceof Villager))runtime.animals.splice(i,1);}const pWx=Math.floor(runtime.player.x/TILE),spawnDistMonster=Math.floor(cw/TILE)+5,spawnDistAnimal=Math.floor(Math.random()*6)+3;if(runtime.dimension==='overworld'){if(isDay&&runtime.animals.length<8&&Math.random()<0.05){const spawnWx=pWx+(Math.random()>0.5?spawnDistAnimal:-spawnDistAnimal),sy=surfaceY(spawnWx),spawnY=(sy-2)*TILE;if(!isSolid(getTile(spawnWx,sy-1))){let types=['pig','cow','sheep','goat','cat','wolf'];if(MOD_MOB_TYPES.length&&Math.random()<0.35){const mm=MOD_MOB_TYPES[Math.floor(Math.random()*MOD_MOB_TYPES.length)];if(!mm.hostile)types=[mm.id];}const t=types[Math.floor(Math.random()*types.length)];runtime.animals.push(new Animal((spawnWx+0.5)*TILE,spawnY,t));}}else if(!isDay&&runtime.monsters.length<5&&Math.random()<0.05){const spawnWx=pWx+(Math.random()>0.5?spawnDistMonster:-spawnDistMonster),sy=surfaceY(spawnWx),spawnY=(sy-2)*TILE;if(!isSolid(getTile(spawnWx,sy-1))){if(MOD_MOB_TYPES.length&&Math.random()<0.25){const hostiles=MOD_MOB_TYPES.filter(m=>m.hostile);if(hostiles.length){const mm=hostiles[Math.floor(Math.random()*hostiles.length)];runtime.animals.push(new Animal((spawnWx+0.5)*TILE,spawnY,mm.id));return;}}const r=Math.random();if(r<0.3)runtime.monsters.push(new Skeleton((spawnWx+0.5)*TILE,spawnY));else if(r<0.5)runtime.monsters.push(new Creeper((spawnWx+0.5)*TILE,spawnY));else runtime.monsters.push(new Monster((spawnWx+0.5)*TILE,spawnY));}}}else{if(runtime.monsters.length<5&&Math.random()<0.05){const spawnWx=pWx+(Math.random()>0.5?spawnDistMonster:-spawnDistMonster),spawnY=runtime.player.y;const r=Math.random();if(r<0.3)runtime.monsters.push(new Skeleton((spawnWx+0.5)*TILE,spawnY));else if(r<0.5)runtime.monsters.push(new Creeper((spawnWx+0.5)*TILE,spawnY));else runtime.monsters.push(new Monster((spawnWx+0.5)*TILE,spawnY));}}}
-function updateDayNight(dt){runtime.timeOfDay+=dt/DAY_SECONDS;while(runtime.timeOfDay>=1){runtime.timeOfDay-=1;runtime.dayCount+=1;if(gameState==='PLAYING'&&!runtime.modMaker){addPopup(cw*0.5,80,'Day '+runtime.dayCount,'#e2e8f0');runtime.achievements.stats.maxDay=Math.max(runtime.achievements.stats.maxDay||1,runtime.dayCount);checkAchievements();}}const isNight=runtime.timeOfDay>=0.75||runtime.timeOfDay<0.25;const depth=runtime.dimension==='nether'?0:(runtime.player?Math.floor(runtime.player.y/TILE)-surfaceY(Math.floor(runtime.player.x/TILE)):0);const isCave=depth>12;dayNightTxt.textContent=runtime.modMaker?'MOD GARAGE':('Day '+runtime.dayCount+' • '+(runtime.dimension==='nether'?'Nether':(isCave?'Cave':(isNight?'Night':'Day')))+(runtime.worldEditor?' · EDIT':''));const inOceanBiome=runtime.player&&getBiome(Math.floor(runtime.player.x/TILE)).name==='Ocean';let tDay=0,tNight=0,tCave=0,tNether=0,tMenu=0,tOcean=0,tShop=0,tCity=0,tMaker=0;if(runtime.modMaker)tMaker=1;else if(runtime.isShopOpen)tShop=1;else if(gameState==='MAIN_MENU'||gameState==='DEVICE_SELECT'||gameState==='CUTSCENE')tMenu=1;else if(runtime.dimension==='nether')tNether=1;else if(inOceanBiome)tOcean=1;else{if(isCave)tCave=1;else if(isNight)tNight=1;else tDay=1;if(isModOwned('city_pack')&&!isCave&&!isNight)tCity=0.35;}if(tMenu>0&&bgmMenu.paused)bgmMenu.play().catch(()=>{});if(tDay>0&&bgmDay.paused)bgmDay.play().catch(()=>{});if(tNight>0&&bgmNight.paused)bgmNight.play().catch(()=>{});if(tCave>0&&bgmCave.paused)bgmCave.play().catch(()=>{});if(tNether>0&&bgmNether.paused)bgmNether.play().catch(()=>{});if(tOcean>0&&bgmOcean.paused)bgmOcean.play().catch(()=>{});if(tShop>0&&bgmShop.paused)bgmShop.play().catch(()=>{});if(bgmCity&&tCity>0&&bgmCity.paused)bgmCity.play().catch(()=>{});if(bgmModMaker&&tMaker>0&&bgmModMaker.paused)bgmModMaker.play().catch(()=>{});bgmMenu.volume=Math.max(0,Math.min(1,bgmMenu.volume+(tMenu>0?dt:-dt)));bgmDay.volume=Math.max(0,Math.min(1,bgmDay.volume+(tDay>0?dt:-dt)));bgmNight.volume=Math.max(0,Math.min(1,bgmNight.volume+(tNight>0?dt:-dt)));bgmCave.volume=Math.max(0,Math.min(1,bgmCave.volume+(tCave>0?dt:-dt)));bgmNether.volume=Math.max(0,Math.min(1,bgmNether.volume+(tNether>0?dt:-dt)));bgmOcean.volume=Math.max(0,Math.min(1,bgmOcean.volume+(tOcean>0?dt:-dt)));bgmShop.volume=Math.max(0,Math.min(1,bgmShop.volume+(tShop>0?dt:-dt)));if(bgmCity)bgmCity.volume=Math.max(0,Math.min(0.4,bgmCity.volume+(tCity>0?dt*0.5:-dt)));if(bgmModMaker)bgmModMaker.volume=Math.max(0,Math.min(0.55,bgmModMaker.volume+(tMaker>0?dt:-dt)));runtime.weatherTimer-=dt;if(runtime.weatherTimer<=0){const r=Math.random();if(r<0.2)runtime.weather='rain';else if(r<0.3)runtime.weather='snow';else runtime.weather='clear';runtime.weatherTimer=60+Math.random()*60;}}
+function updateDayNight(dt){runtime.timeOfDay+=dt/DAY_SECONDS;while(runtime.timeOfDay>=1){runtime.timeOfDay-=1;runtime.dayCount+=1;if(gameState==='PLAYING'&&!runtime.modMaker){addPopup(cw*0.5,80,'Day '+runtime.dayCount,'#e2e8f0');runtime.achievements.stats.maxDay=Math.max(runtime.achievements.stats.maxDay||1,runtime.dayCount);checkAchievements();}}const isNight=runtime.timeOfDay>=0.75||runtime.timeOfDay<0.25;const depth=runtime.dimension==='nether'?0:(runtime.player?Math.floor(runtime.player.y/TILE)-surfaceY(Math.floor(runtime.player.x/TILE)):0);const isCave=depth>12;dayNightTxt.textContent=runtime.modMaker?'MOD GARAGE':('Day '+runtime.dayCount+' • '+(runtime.dimension==='nether'?'Nether':(isCave?'Cave':(isNight?'Night':'Day')))+(runtime.worldEditor?' · EDIT':''));const inOceanBiome=runtime.player&&getBiome(Math.floor(runtime.player.x/TILE)).name==='Ocean';let tDay=0,tNight=0,tCave=0,tNether=0,tMenu=0,tOcean=0,tShop=0,tCity=0,tMaker=0;if(runtime.modMaker)tMaker=1;else if(runtime.isShopOpen)tShop=1;else if(gameState==='MAIN_MENU'||gameState==='DEVICE_SELECT'||gameState==='CUTSCENE'||gameState==='LOADING')tMenu=1;else if(runtime.dimension==='nether')tNether=1;else if(inOceanBiome)tOcean=1;else{if(isCave)tCave=1;else if(isNight)tNight=1;else tDay=1;if(isModOwned('city_pack')&&!isCave&&!isNight)tCity=0.35;}if(tMenu>0&&bgmMenu.paused)bgmMenu.play().catch(()=>{});if(tDay>0&&bgmDay.paused)bgmDay.play().catch(()=>{});if(tNight>0&&bgmNight.paused)bgmNight.play().catch(()=>{});if(tCave>0&&bgmCave.paused)bgmCave.play().catch(()=>{});if(tNether>0&&bgmNether.paused)bgmNether.play().catch(()=>{});if(tOcean>0&&bgmOcean.paused)bgmOcean.play().catch(()=>{});if(tShop>0&&bgmShop.paused)bgmShop.play().catch(()=>{});if(bgmCity&&tCity>0&&bgmCity.paused)bgmCity.play().catch(()=>{});if(bgmModMaker&&tMaker>0&&bgmModMaker.paused)bgmModMaker.play().catch(()=>{});bgmMenu.volume=Math.max(0,Math.min(1,bgmMenu.volume+(tMenu>0?dt:-dt)));bgmDay.volume=Math.max(0,Math.min(1,bgmDay.volume+(tDay>0?dt:-dt)));bgmNight.volume=Math.max(0,Math.min(1,bgmNight.volume+(tNight>0?dt:-dt)));bgmCave.volume=Math.max(0,Math.min(1,bgmCave.volume+(tCave>0?dt:-dt)));bgmNether.volume=Math.max(0,Math.min(1,bgmNether.volume+(tNether>0?dt:-dt)));bgmOcean.volume=Math.max(0,Math.min(1,bgmOcean.volume+(tOcean>0?dt:-dt)));bgmShop.volume=Math.max(0,Math.min(1,bgmShop.volume+(tShop>0?dt:-dt)));if(bgmCity)bgmCity.volume=Math.max(0,Math.min(0.4,bgmCity.volume+(tCity>0?dt*0.5:-dt)));if(bgmModMaker)bgmModMaker.volume=Math.max(0,Math.min(0.55,bgmModMaker.volume+(tMaker>0?dt:-dt)));runtime.weatherTimer-=dt;if(runtime.weatherTimer<=0){const r=Math.random();if(r<0.2)runtime.weather='rain';else if(r<0.3)runtime.weather='snow';else runtime.weather='clear';runtime.weatherTimer=60+Math.random()*60;}}
 function initGame(loadFromSave=false){baseTileCache.clear();surfaceYCache.clear();if(scoreEl)scoreEl.textContent=String(runtime.score|0);applyOwnedMods();runtime.ruinFound=false;runtime.monsters=[];runtime.animals=[];runtime.arrows=[];runtime.vehicles=[];runtime.mountedVehicle=null;runtime.particles=[];runtime.popups=[];runtime.isCraftingOpen=false;runtime.isVillageOpen=false;runtime.isShopOpen=false;runtime.menuOpen=false;runtime.settingsOpen=false;runtime.worldEditor=false;runtime.modMaker=false;runtime.editorTool='place';runtime.makerTool='move';runtime.mining={active:false,x:0,y:0,timer:0,maxTime:1,targetTier:0,valid:false};runtime.shieldActive=false;runtime.playerChatBubble=null;runtime.tpCooldown=0;elevatorRideInputLockUntil=0;craftingPanel.classList.add('hidden');craftingPanel.classList.remove('flex');villagePanel.classList.add('hidden');villagePanel.classList.remove('flex');settingsPanel.classList.add('hidden');settingsPanel.classList.remove('flex');shopPanel.classList.add('hidden');shopPanel.classList.remove('flex');creativePanel.classList.add('hidden');creativePanel.classList.remove('flex');villagerInteractPanel.classList.add('hidden');villagerInteractPanel.classList.remove('flex');elevatorPanel.classList.add('hidden');elevatorPanel.classList.remove('flex');elevatorRidePanel.classList.add('hidden');elevatorRidePanel.classList.remove('flex');if(billboardTextPanel){billboardTextPanel.classList.add('hidden');billboardTextPanel.classList.remove('flex');}if(makerSavePanel){makerSavePanel.classList.add('hidden');makerSavePanel.classList.remove('flex');}if(elevatorRidePanel)elevatorRidePanel.style.pointerEvents='auto';currentInteractingVillager=null;runtime.ghostMode=false;ghostBtn.textContent='COL: NORM';ghostBtn.classList.remove('text-red-300');ghostBtn.classList.add('text-white');runtime.placeMode='normal';if(placeModeBtn){placeModeBtn.textContent='PLC: NORM';placeModeBtn.classList.remove('text-teal-200');placeModeBtn.classList.add('text-white');}runtime.uiHidden=false;if(!loadFromSave){runtime.overlays.clear();runtime.blockMeta.clear();let spawnWx=Math.max(2,Math.floor(cw/TILE*0.5));if(runtime.currentWorld&&runtime.currentWorld.spawnBiome&&runtime.currentWorld.spawnBiome!=='Random'){const seed=currentSeed();for(let chunk=0;chunk<100;chunk++){let idx=Math.floor(Math.abs(hashInt(chunk,0,seed))*BIOMES.length)%BIOMES.length;if(BIOMES[idx].name===runtime.currentWorld.spawnBiome){spawnWx=chunk*100+50;break;}let chunkN=-chunk-1;let idxN=Math.floor(Math.abs(hashInt(chunkN,0,seed))*BIOMES.length)%BIOMES.length;if(BIOMES[idxN].name===runtime.currentWorld.spawnBiome){spawnWx=chunkN*100+50;break;}}}if(runtime.currentWorld&&runtime.currentWorld.spawnX!==undefined&&!isNaN(runtime.currentWorld.spawnX))spawnWx=runtime.currentWorld.spawnX;const spawnX=(spawnWx+0.5)*TILE;let spawnY=(surfaceY(spawnWx)-2)*TILE;if(runtime.currentWorld&&runtime.currentWorld.spawnY!==undefined&&!isNaN(runtime.currentWorld.spawnY))spawnY=-runtime.currentWorld.spawnY*TILE;runtime.player={x:spawnX,y:spawnY,vx:0,vy:0,hp:100,hunger:100,grounded:false,inventory:createDefaultInventory(),durability:{}};runtime.camera.x=spawnX;runtime.camera.y=spawnY;runtime.dayCount=1;runtime.timeOfDay=0.3;runtime.dimension='overworld';runtime.overworldPos=null;runtime.netherPos=null;runtime.offhandItem=null;runtime.armorItem=null;runtime.isCreative=runtime.currentWorld?runtime.currentWorld.gamemode==='creative':false;runtime.noclip=false;addItem('torch',8);}else{runtime.camera.x=runtime.player.x;runtime.camera.y=runtime.player.y;runtime.dayCount=Math.max(1,runtime.dayCount||1);runtime.timeOfDay=Number.isFinite(runtime.timeOfDay)?Math.max(0,Math.min(0.999,runtime.timeOfDay)):0.3;if(runtime.player.hunger===undefined)runtime.player.hunger=100;if(!runtime.player.durability)runtime.player.durability={};if(runtime.currentWorld&&runtime.currentWorld.gamemode)runtime.isCreative=runtime.currentWorld.gamemode==='creative';}runtime.remotePlayersList=[];runtime.selectedItem=null;hpEl.textContent='100';hungerEl.textContent='100';goTitle.textContent='YOU DIED';goMsg.textContent='The wild reclaimed you.';renderInventory();updateTpPinBtn();updateInvCapUI();syncEditorUI();bgmMenu.volume=0;bgmDay.volume=0;bgmNight.volume=0;bgmCave.volume=0;bgmNether.volume=0;bgmOcean.volume=0;bgmShop.volume=0;if(bgmCity)bgmCity.volume=0;if(bgmModMaker)bgmModMaker.volume=0;document.getElementById('world-name').textContent=(runtime.currentWorld?runtime.currentWorld.name:'Zone Alpha')+(runtime.dimension==='nether'?' (Nether)':'');updateCoordDisplay();const noclipBtn=document.getElementById('creative-noclip-btn');if(noclipBtn)noclipBtn.textContent=runtime.noclip?'Noclip: ON':'Noclip: OFF';runtime.achievements.stats.maxDay=Math.max(runtime.achievements.stats.maxDay||1,runtime.dayCount||1);notePeakScore();}
 function updateCoordDisplay(){if(coordDisplay)coordDisplay.style.display=runtime.settings.showCoords?'flex':'none';}
 function toggleUI(){runtime.uiHidden=!runtime.uiHidden;if(runtime.uiHidden){hud.classList.add('hidden');uiShowBtn.classList.remove('hidden');openChatBtn.classList.add('hidden');}else{hud.classList.remove('hidden');uiShowBtn.classList.add('hidden');openChatBtn.classList.remove('hidden');}vibrate('light');}
 function toggleSettings(){if(isInputLocked())return;runtime.settingsOpen=!runtime.settingsOpen;if(runtime.settingsOpen){if(runtime.isShopOpen)closeShop();settingsPanel.classList.remove('hidden');settingsPanel.classList.add('flex');renderSettings();}else{settingsPanel.classList.add('hidden');settingsPanel.classList.remove('flex');if(gameState==='MAIN_MENU')mainMenuContent.classList.remove('hidden');}}
 function renderSettings(){let html='<div class="setting-item"><div class="flex justify-between items-center mb-2"><span class="text-sm font-bold text-slate-200">Particles</span><span class="text-xs text-slate-400" id="val-particles">'+runtime.settings.particleLimit+'</span></div><input type="range" min="0" max="200" value="'+runtime.settings.particleLimit+'" class="w-full" oninput="window.updateSetting(\'particleLimit\',this.value)"></div>';html+='<div class="setting-item"><div class="flex justify-between items-center"><span class="text-sm font-bold text-slate-200">Screen Shake</span><input type="checkbox" class="toggle-checkbox" '+(runtime.settings.enableScreenshake?'checked':'')+' onchange="window.updateSetting(\'enableScreenshake\',this.checked)"></div></div>';html+='<div class="setting-item"><div class="flex justify-between items-center"><span class="text-sm font-bold text-slate-200">Vibration</span><input type="checkbox" class="toggle-checkbox" '+(runtime.settings.enableVibration?'checked':'')+' onchange="window.updateSetting(\'enableVibration\',this.checked)"></div></div>';html+='<div class="setting-item"><div class="flex justify-between items-center"><span class="text-sm font-bold text-slate-200">Show Coordinates</span><input type="checkbox" class="toggle-checkbox" '+(runtime.settings.showCoords?'checked':'')+' onchange="window.updateSetting(\'showCoords\',this.checked)"></div></div>';html+='<div class="setting-item"><div class="flex justify-between items-center mb-2"><span class="text-sm font-bold text-slate-200">Render Distance</span><span class="text-xs text-slate-400" id="val-render">'+runtime.settings.renderDistance+'</span></div><input type="range" min="1" max="5" value="'+runtime.settings.renderDistance+'" class="w-full" oninput="window.updateSetting(\'renderDistance\',this.value)"></div>';html+='<div class="setting-item"><div class="flex justify-between items-center mb-2"><span class="text-sm font-bold text-slate-200">UI Scale</span><span class="text-xs text-slate-400" id="val-uiscale">'+(runtime.settings.uiScale||1.0).toFixed(1)+'x</span></div><input type="range" min="0.5" max="1.5" step="0.1" value="'+(runtime.settings.uiScale||1.0)+'" class="w-full" oninput="window.updateSetting(\'uiScale\',this.value)"></div>';html+='<div class="setting-item"><div class="flex justify-between items-center"><span class="text-sm font-bold text-slate-200">RTX / Glow Lights</span><input type="checkbox" class="toggle-checkbox" '+(runtime.settings.rtxGraphics?'checked':'')+' onchange="window.updateSetting(\'rtxGraphics\',this.checked)"></div></div>';settingsList.innerHTML=html;}
 window.updateSetting=(key,val)=>{if(key==='particleLimit'){runtime.settings[key]=parseInt(val)||0;const el=document.getElementById('val-particles');if(el)el.textContent=runtime.settings[key];}else if(key==='renderDistance'){runtime.settings[key]=parseInt(val)||3;const el=document.getElementById('val-render');if(el)el.textContent=runtime.settings[key];}else if(key==='uiScale'){runtime.settings[key]=parseFloat(val)||1.0;const el=document.getElementById('val-uiscale');if(el)el.textContent=runtime.settings[key].toFixed(1)+'x';window.applyUIScale();}else if(key==='rtxGraphics'){runtime.settings[key]=!!val;}else{runtime.settings[key]=!!val;if(key==='showCoords')updateCoordDisplay();}saveSettings();};
-function setState(s){gameState=s;if(deviceSelectScreen){if(s==='DEVICE_SELECT')deviceSelectScreen.classList.remove('hidden');else deviceSelectScreen.classList.add('hidden');}if(introCutscene){if(s==='CUTSCENE')introCutscene.classList.remove('hidden');else introCutscene.classList.add('hidden');}if(s==='PLAYING'){if(!runtime.uiHidden)hud.classList.remove('hidden');else hud.classList.add('hidden');if(!runtime.modMaker)controlsEl.classList.remove('hidden');else controlsEl.classList.add('hidden');gameOverScreen.classList.add('hidden');pauseScreen.classList.add('hidden');mainMenuScreen.classList.add('hidden');if(runtime.uiHidden){hud.classList.add('hidden');uiShowBtn.classList.remove('hidden');}if(!runtime.uiHidden)openChatBtn.classList.remove('hidden');else openChatBtn.classList.add('hidden');syncEditorUI();}else if(s==='GAMEOVER'){hud.classList.add('hidden');controlsEl.classList.add('hidden');gameOverScreen.classList.remove('hidden');pauseScreen.classList.add('hidden');mainMenuScreen.classList.add('hidden');uiShowBtn.classList.add('hidden');openChatBtn.classList.add('hidden');}else if(s==='PAUSED'){pauseScreen.classList.remove('hidden');if(runtime.isMultiplayer&&runtime.isHost)document.getElementById('close-server-btn').classList.remove('hidden');else document.getElementById('close-server-btn').classList.add('hidden');}else if(s==='MAIN_MENU'){hud.classList.add('hidden');controlsEl.classList.add('hidden');gameOverScreen.classList.add('hidden');pauseScreen.classList.add('hidden');mainMenuScreen.classList.remove('hidden');mainMenuContent.classList.remove('hidden');uiShowBtn.classList.add('hidden');document.getElementById('multiplayer-panel').classList.add('hidden');accountPanel.classList.add('hidden');openChatBtn.classList.add('hidden');runtime.worldEditor=false;runtime.modMaker=false;syncEditorUI();updateAccountUI();}else if(s==='DEVICE_SELECT'||s==='CUTSCENE'){hud.classList.add('hidden');controlsEl.classList.add('hidden');gameOverScreen.classList.add('hidden');pauseScreen.classList.add('hidden');mainMenuScreen.classList.add('hidden');uiShowBtn.classList.add('hidden');openChatBtn.classList.add('hidden');}}
+function setState(s){gameState=s;if(loadingScreen){if(s==='LOADING')loadingScreen.classList.remove('hidden');else loadingScreen.classList.add('hidden');}if(deviceSelectScreen){if(s==='DEVICE_SELECT')deviceSelectScreen.classList.remove('hidden');else deviceSelectScreen.classList.add('hidden');}if(introCutscene){if(s==='CUTSCENE')introCutscene.classList.remove('hidden');else introCutscene.classList.add('hidden');}if(s==='PLAYING'){if(!runtime.uiHidden)hud.classList.remove('hidden');else hud.classList.add('hidden');if(!runtime.modMaker)controlsEl.classList.remove('hidden');else controlsEl.classList.add('hidden');gameOverScreen.classList.add('hidden');pauseScreen.classList.add('hidden');mainMenuScreen.classList.add('hidden');if(runtime.uiHidden){hud.classList.add('hidden');uiShowBtn.classList.remove('hidden');}if(!runtime.uiHidden)openChatBtn.classList.remove('hidden');else openChatBtn.classList.add('hidden');syncEditorUI();}else if(s==='GAMEOVER'){hud.classList.add('hidden');controlsEl.classList.add('hidden');gameOverScreen.classList.remove('hidden');pauseScreen.classList.add('hidden');mainMenuScreen.classList.add('hidden');uiShowBtn.classList.add('hidden');openChatBtn.classList.add('hidden');}else if(s==='PAUSED'){pauseScreen.classList.remove('hidden');if(runtime.isMultiplayer&&runtime.isHost)document.getElementById('close-server-btn').classList.remove('hidden');else document.getElementById('close-server-btn').classList.add('hidden');}else if(s==='MAIN_MENU'){hud.classList.add('hidden');controlsEl.classList.add('hidden');gameOverScreen.classList.add('hidden');pauseScreen.classList.add('hidden');mainMenuScreen.classList.remove('hidden');mainMenuContent.classList.remove('hidden');uiShowBtn.classList.add('hidden');document.getElementById('multiplayer-panel').classList.add('hidden');accountPanel.classList.add('hidden');openChatBtn.classList.add('hidden');runtime.worldEditor=false;runtime.modMaker=false;syncEditorUI();updateAccountUI();}else if(s==='LOADING'||s==='DEVICE_SELECT'||s==='CUTSCENE'){hud.classList.add('hidden');controlsEl.classList.add('hidden');gameOverScreen.classList.add('hidden');pauseScreen.classList.add('hidden');mainMenuScreen.classList.add('hidden');uiShowBtn.classList.add('hidden');openChatBtn.classList.add('hidden');}}
+function updateLoadingUI(p){
+  const pct=Math.max(0,Math.min(1,p));
+  const pctInt=Math.floor(pct*100);
+  if(loadingBar)loadingBar.style.width=(pct*100).toFixed(1)+'%';
+  if(loadingPct)loadingPct.textContent=pctInt+'%';
+  let stepMsg='Booting engine…';
+  for(let i=0;i<LOADING_STEPS.length;i++){if(pct>=LOADING_STEPS[i].t)stepMsg=LOADING_STEPS[i].msg;}
+  if(loadingStatus)loadingStatus.textContent=stepMsg;
+  if(loadingTip){
+    const tipIdx=Math.min(LOADING_TIPS.length-1,Math.floor(pct*LOADING_TIPS.length));
+    loadingTip.textContent=LOADING_TIPS[tipIdx];
+  }
+}
+function finishLoadingScreen(){
+  if(loadingDone)return;
+  loadingDone=true;
+  updateLoadingUI(1);
+  playSfx('sfx_pickup');
+  vibrate('light');
+  setState('DEVICE_SELECT');
+}
+function tickLoading(now){
+  if(loadingDone||gameState!=='LOADING')return;
+  if(!loadingStartTs)loadingStartTs=now||performance.now();
+  const elapsed=(now||performance.now())-loadingStartTs;
+  const p=Math.min(1,elapsed/LOADING_DURATION_MS);
+  updateLoadingUI(p);
+  if(p>=1){finishLoadingScreen();return;}
+  loadingRaf=requestAnimationFrame(tickLoading);
+}
+function startLoadingSequence(){
+  loadingDone=false;
+  loadingStartTs=performance.now();
+  updateLoadingUI(0);
+  setState('LOADING');
+  if(loadingRaf)cancelAnimationFrame(loadingRaf);
+  loadingRaf=requestAnimationFrame(tickLoading);
+}
 function selectDevice(scale){unlockAudio();deviceChosen=true;runtime.settings.uiScale=scale;saveSettings();window.applyUIScale();playSfx('sfx_interact');vibrate('light');setState('CUTSCENE');}
 function finishCutscene(){if(gameState!=='CUTSCENE')return;unlockAudio();playSfx('sfx_pickup');vibrate('light');armMenuInputLock(550);setState('MAIN_MENU');}
-devicePcBtn.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();selectDevice(0.6);},{passive:false});
-deviceMobileBtn.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();selectDevice(1.0);},{passive:false});
+devicePcBtn.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();if(gameState!=='DEVICE_SELECT')return;selectDevice(0.6);},{passive:false});
+deviceMobileBtn.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();if(gameState!=='DEVICE_SELECT')return;selectDevice(1.0);},{passive:false});
 introCutscene.addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();},{passive:false});
 introCutscene.addEventListener('pointerup',e=>{e.preventDefault();e.stopPropagation();finishCutscene();},{passive:false});
 introCutscene.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();},{passive:false});
 introCutscene.addEventListener('pointercancel',e=>{e.preventDefault();e.stopPropagation();},{passive:false});
+if(loadingScreen){
+  loadingScreen.addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();unlockAudio();},{passive:false});
+  loadingScreen.addEventListener('pointerup',e=>{e.preventDefault();e.stopPropagation();},{passive:false});
+}
 function restartGame(){initGame(false);setState('PLAYING');}
 function getToolStats(itemName){if(!itemName)return TOOL_STATS['hand'];return TOOL_STATS[itemName]||TOOL_STATS['hand'];}
 function completeMining(){const{x:wx,y:wy,valid}=runtime.mining;let rawT=getTile(wx,wy),t=rawT;if(t.startsWith('P:'))t=t.substring(2);const s=worldToScreen(wx,wy),sx=s.x+TILE/2,sy=s.y+TILE/2;if(isGarageDoorTile(t)){const give=valid||runtime.isCreative||runtime.worldEditor;breakGarageColumn(wx,wy,give&&!runtime.worldEditor);makeBurst(sx,sy,PALETTE[garageDoorBaseId(t)]||'#6d4c41',10);playSfx('sfx_break');vibrate('medium');if(give&&!runtime.worldEditor){damageTool(runtime.selectedItem);runtime.score+=1;saveGlobalScore();playSfx('sfx_pickup');bumpStat('blocksMined',1);notePeakScore();}else if(runtime.worldEditor)bumpStat('blocksMined',1);else addPopup(sx,sy,'Need Tool','#aaa');return;}let effSolid=isSolid(rawT)||t==='door_open';if(!effSolid||t==='ruin'||FARM_CROPS.includes(t)){if(t==='ruin'){if(!runtime.ruinFound){runtime.ruinFound=true;playSfx('sfx_ruin');vibrate('heavy');makeBurst(sx,sy,'#b9a5ce',30);addPopup(cw*0.5,ch*0.5,'ANCIENT RUIN DISCOVERED!','#d8b4fe');runtime.score+=1000;saveGlobalScore();notePeakScore();if(runtime.settings.enableScreenshake){gameContainer.classList.add('shake');setTimeout(()=>gameContainer.classList.remove('shake'),500);}goTitle.textContent='LEGEND FOUND';goMsg.textContent='You discovered the secrets of the forest.';setTimeout(()=>setState('GAMEOVER'),2000);}else addPopup(sx,sy,'Already discovered.','#aaa');return;}if(FARM_CROPS.includes(t)){harvestCrop(wx,wy,t,sx,sy);return;}return;}if(t==='door_open')t='door';if(t==='water'||t==='lava'){addPopup(sx,sy,'Need Bucket','#aaa');return;}setTile(wx,wy,'air');runtime.blockMeta.delete(tileKey(wx,wy));makeBurst(sx,sy,PALETTE[t]||'#888',8);playSfx('sfx_break');vibrate('medium');if(valid||runtime.isCreative||runtime.worldEditor){if(!runtime.worldEditor){if(t==='leaves'&&Math.random()<0.3){const dropSeed=FARM_SEEDS[Math.floor(Math.random()*FARM_SEEDS.length)];addItem(dropSeed,1);addPopup(sx,sy,'+Seed!',PALETTE[dropSeed]);}else if(t==='dirt'&&Math.random()<0.1){addItem('wheat_seeds',1);addPopup(sx,sy,'+Wheat Seed!','#c2b280');}else{addItem(t,1);}damageTool(runtime.selectedItem);const isOre=ORES.includes(t);runtime.score+=isOre?50:1;saveGlobalScore();playSfx('sfx_pickup');if(isOre)addPopup(sx,sy,t.toUpperCase()+'!',PALETTE[t]);if(isOre)bumpStat('oresMined',1);notePeakScore();}bumpStat('blocksMined',1);}else{addPopup(sx,sy,'Need Tool','#aaa');}}
@@ -2131,10 +2235,10 @@ ctx.font='bold 14px Fredoka';ctx.textAlign='center';ctx.lineWidth=3;for(let i=0;
 const ambientDark=computeAmbientDark();
 drawLightingOverlay(lights,ambientDark);
 }
-function gameLoop(ts){const dt=Math.min(0.05,(ts-lastTime)/1000||0.016);lastTime=ts;try{if((gameState==='PLAYING'||gameState==='MAIN_MENU'||gameState==='DEVICE_SELECT'||gameState==='CUTSCENE')&&runtime.player&&!runtime.isCraftingOpen&&!runtime.isVillageOpen&&!runtime.isShopOpen&&!runtime.menuOpen&&!runtime.settingsOpen&&accountPanel.classList.contains('hidden')&&villagerInteractPanel.classList.contains('hidden')&&elevatorPanel.classList.contains('hidden')&&elevatorRidePanel.classList.contains('hidden')&&(!billboardTextPanel||billboardTextPanel.classList.contains('hidden'))&&(!makerSavePanel||makerSavePanel.classList.contains('hidden'))){if(gameState==='PLAYING'||gameState==='MAIN_MENU'||gameState==='DEVICE_SELECT'||gameState==='CUTSCENE'){if(gameState==='PLAYING')updateGame(dt);else{updateDayNight(dt);runtime.camera.x+=(runtime.player.x-runtime.camera.x)*2*dt;runtime.camera.y+=(runtime.player.y-runtime.camera.y)*2*dt;for(let i=runtime.particles.length-1;i>=0;i--){runtime.particles[i].update(dt);if(runtime.particles[i].life<=0)runtime.particles.splice(i,1);}}if(gameState==='MAIN_MENU'||gameState==='DEVICE_SELECT'||gameState==='CUTSCENE'){runtime.player.hp=100;runtime.player.hunger=100;}}}else if(runtime.isShopOpen||runtime.modMaker){updateDayNight(dt);if(runtime.modMaker&&gameState==='PLAYING'){for(let i=runtime.particles.length-1;i>=0;i--){runtime.particles[i].update(dt);if(runtime.particles[i].life<=0)runtime.particles.splice(i,1);}}}drawGame();}catch(_){if(!runtime.player)initGame(false);const g=ctx.createLinearGradient(0,0,0,ch);g.addColorStop(0,'#0f172a');g.addColorStop(1,'#1e293b');ctx.fillStyle=g;ctx.fillRect(0,0,cw,ch);}requestAnimationFrame(gameLoop);}
+function gameLoop(ts){const dt=Math.min(0.05,(ts-lastTime)/1000||0.016);lastTime=ts;try{if((gameState==='PLAYING'||gameState==='MAIN_MENU'||gameState==='DEVICE_SELECT'||gameState==='CUTSCENE'||gameState==='LOADING')&&runtime.player&&!runtime.isCraftingOpen&&!runtime.isVillageOpen&&!runtime.isShopOpen&&!runtime.menuOpen&&!runtime.settingsOpen&&accountPanel.classList.contains('hidden')&&villagerInteractPanel.classList.contains('hidden')&&elevatorPanel.classList.contains('hidden')&&elevatorRidePanel.classList.contains('hidden')&&(!billboardTextPanel||billboardTextPanel.classList.contains('hidden'))&&(!makerSavePanel||makerSavePanel.classList.contains('hidden'))){if(gameState==='PLAYING'||gameState==='MAIN_MENU'||gameState==='DEVICE_SELECT'||gameState==='CUTSCENE'||gameState==='LOADING'){if(gameState==='PLAYING')updateGame(dt);else{updateDayNight(dt);runtime.camera.x+=(runtime.player.x-runtime.camera.x)*2*dt;runtime.camera.y+=(runtime.player.y-runtime.camera.y)*2*dt;for(let i=runtime.particles.length-1;i>=0;i--){runtime.particles[i].update(dt);if(runtime.particles[i].life<=0)runtime.particles.splice(i,1);}}if(gameState==='MAIN_MENU'||gameState==='DEVICE_SELECT'||gameState==='CUTSCENE'||gameState==='LOADING'){runtime.player.hp=100;runtime.player.hunger=100;}}}else if(runtime.isShopOpen||runtime.modMaker){updateDayNight(dt);if(runtime.modMaker&&gameState==='PLAYING'){for(let i=runtime.particles.length-1;i>=0;i--){runtime.particles[i].update(dt);if(runtime.particles[i].life<=0)runtime.particles.splice(i,1);}}}drawGame();}catch(_){if(!runtime.player)initGame(false);const g=ctx.createLinearGradient(0,0,0,ch);g.addColorStop(0,'#0f172a');g.addColorStop(1,'#1e293b');ctx.fillStyle=g;ctx.fillRect(0,0,cw,ch);}requestAnimationFrame(gameLoop);}
 function getPoint(e){const rect=canvas.getBoundingClientRect();return{x:e.clientX-rect.left,y:e.clientY-rect.top};}
 function handleGameInput(e){if(runtime.isCraftingOpen||runtime.isVillageOpen||runtime.isShopOpen||runtime.menuOpen||runtime.settingsOpen||!accountPanel.classList.contains('hidden')||!creativePanel.classList.contains('hidden')||!villagerInteractPanel.classList.contains('hidden')||!elevatorPanel.classList.contains('hidden')||!elevatorRidePanel.classList.contains('hidden')||(billboardTextPanel&&!billboardTextPanel.classList.contains('hidden'))||(makerSavePanel&&!makerSavePanel.classList.contains('hidden')))return;const target=e.target&&e.target.closest?e.target.closest('[data-input]'):null,action=target?target.dataset.input:null;if(e.type==='pointerdown'){if(action){runtime.controlPointerRoles.set(e.pointerId,action);if(action==='left')runtime.moveInput.left=true;else if(action==='right')runtime.moveInput.right=true;else if(action==='jump')runtime.moveInput.jump=true;else if(action==='shield'){runtime.shieldActive=true;vibrate('light');}}else{if(e.target!==canvas)return;const p=getPoint(e),w=screenToWorld(p.x,p.y);if(runtime.modMaker){handleMakerPointer(e,'down');runtime.controlPointerRoles.set(e.pointerId,{type:'maker'});return;}if(runtime.worldEditor){editorPlaceOrErase(p.x,p.y);runtime.controlPointerRoles.set(e.pointerId,{type:'editor',startX:p.x,startY:p.y,wx:w.wx,wy:w.wy});return;}let hitEntity=false;const entities=[...runtime.monsters,...runtime.animals];for(let m of entities){const msx=m.x-runtime.camera.x+cw*0.5,msy=m.y-runtime.camera.y+ch*0.5;if(Math.hypot(p.x-msx,p.y-msy)<40){tryPlaceOrInteract(p.x,p.y);hitEntity=true;break;}}if(!hitEntity){for(const v of runtime.vehicles){const vsx=v.x-runtime.camera.x+cw*0.5,vsy=v.y-runtime.camera.y+ch*0.5;if(Math.hypot(p.x-vsx,p.y-vsy)<40){tryPlaceOrInteract(p.x,p.y);hitEntity=true;break;}}}if(!hitEntity){if(runtime.selectedItem&&(FOODS[runtime.selectedItem]||BUCKET_TYPES.has(runtime.selectedItem)||FARM_SEEDS.includes(runtime.selectedItem)||VEHICLE_ITEMS.has(runtime.selectedItem)||GARAGE_DOORS.includes(runtime.selectedItem)||getToolStats(runtime.selectedItem).type==='hoe'||runtime.selectedItem==='mini_teleporter'||runtime.selectedItem==='torch'||runtime.selectedItem==='city_elevator'||runtime.selectedItem==='backpack'||runtime.selectedItem==='billboard'||runtime.selectedItem==='text_sign'||CITY_ITEMS.has(runtime.selectedItem))){tryPlaceOrInteract(p.x,p.y);}else{startMining(w.wx,w.wy);runtime.controlPointerRoles.set(e.pointerId,{type:'world',startX:p.x,startY:p.y,startTime:performance.now(),wx:w.wx,wy:w.wy});}}}}else if(e.type==='pointermove'){const role=runtime.controlPointerRoles.get(e.pointerId);if(role&&role.type==='maker'){handleMakerPointer(e,'move');}else if(role&&role.type==='world'){const p=getPoint(e),w=screenToWorld(p.x,p.y);if(w.wx!==role.wx||w.wy!==role.wy){role.wx=w.wx;role.wy=w.wy;startMining(w.wx,w.wy);}}else if(role&&role.type==='editor'){const p=getPoint(e),w=screenToWorld(p.x,p.y);if(w.wx!==role.wx||w.wy!==role.wy){role.wx=w.wx;role.wy=w.wy;editorPlaceOrErase(p.x,p.y);}}}else if(e.type==='pointerup'||e.type==='pointercancel'){const role=runtime.controlPointerRoles.get(e.pointerId);if(role){if(typeof role==='string'){if(role==='left')runtime.moveInput.left=false;if(role==='right')runtime.moveInput.right=false;if(role==='jump')runtime.moveInput.jump=false;if(role==='shield')runtime.shieldActive=false;}else if(role.type==='maker'){handleMakerPointer(e,'up');}else if(role.type==='world'){if(performance.now()-role.startTime<250)tryPlaceOrInteract(role.startX,role.startY);runtime.mining.active=false;}}runtime.controlPointerRoles.delete(e.pointerId);}}
-function handleGlobalInput(e){unlockAudio();if(gameState==='DEVICE_SELECT'||gameState==='CUTSCENE'){if(e.preventDefault)e.preventDefault();return;}if(isInputLocked()&&gameState==='MAIN_MENU'){if(e.preventDefault)e.preventDefault();if(e.stopPropagation)e.stopPropagation();return;}if(e.preventDefault&&!e.target.closest('#vkb-panel')&&!e.target.closest('#world-panel')&&!e.target.closest('#crafting-panel')&&!e.target.closest('#village-panel')&&!e.target.closest('#settings-panel')&&!e.target.closest('#shop-panel')&&!e.target.closest('#multiplayer-panel')&&!e.target.closest('#account-panel')&&!e.target.closest('#chat-log-container')&&!e.target.closest('#creative-panel')&&!e.target.closest('#villager-interact-panel')&&!e.target.closest('#elevator-panel')&&!e.target.closest('#elevator-ride-panel')&&!e.target.closest('#billboard-text-panel')&&!e.target.closest('#maker-save-panel')&&!e.target.closest('#device-select-screen')&&!e.target.closest('#intro-cutscene')&&!e.target.closest('#editor-toolbar')&&!e.target.closest('#mod-maker-toolbar'))e.preventDefault();if(gameState==='GAMEOVER'){restartGame();return;}if(gameState==='PLAYING')handleGameInput(e);}
+function handleGlobalInput(e){unlockAudio();if(gameState==='LOADING'||gameState==='DEVICE_SELECT'||gameState==='CUTSCENE'){if(e.preventDefault)e.preventDefault();return;}if(isInputLocked()&&gameState==='MAIN_MENU'){if(e.preventDefault)e.preventDefault();if(e.stopPropagation)e.stopPropagation();return;}if(e.preventDefault&&!e.target.closest('#vkb-panel')&&!e.target.closest('#world-panel')&&!e.target.closest('#crafting-panel')&&!e.target.closest('#village-panel')&&!e.target.closest('#settings-panel')&&!e.target.closest('#shop-panel')&&!e.target.closest('#multiplayer-panel')&&!e.target.closest('#account-panel')&&!e.target.closest('#chat-log-container')&&!e.target.closest('#creative-panel')&&!e.target.closest('#villager-interact-panel')&&!e.target.closest('#elevator-panel')&&!e.target.closest('#elevator-ride-panel')&&!e.target.closest('#billboard-text-panel')&&!e.target.closest('#maker-save-panel')&&!e.target.closest('#loading-screen')&&!e.target.closest('#device-select-screen')&&!e.target.closest('#intro-cutscene')&&!e.target.closest('#editor-toolbar')&&!e.target.closest('#mod-maker-toolbar'))e.preventDefault();if(gameState==='GAMEOVER'){restartGame();return;}if(gameState==='PLAYING')handleGameInput(e);}
 function saveGame(auto=false){if(!runtime.currentWorld||!runtime.player)return;const savedAnimals=runtime.animals.filter(a=>a.tamed||a instanceof Villager).map(a=>({x:a.x,y:a.y,type:a.type,isVillager:a instanceof Villager,hp:a.hp,ownerId:a.ownerId,tamed:a.tamed,following:a.following,level:a.level,name:a.name,color:a.color,skinColor:a.skinColor,lookIndex:a.lookIndex}));const data={player:runtime.player,overlays:Array.from(runtime.overlays.entries()),blockMeta:Array.from(runtime.blockMeta.entries()),score:runtime.score,ruinFound:runtime.ruinFound,dayCount:runtime.dayCount,timeOfDay:runtime.timeOfDay,dimension:runtime.dimension,overworldPos:runtime.overworldPos,netherPos:runtime.netherPos,offhandItem:runtime.offhandItem,armorItem:runtime.armorItem,isCreative:runtime.isCreative&&!runtime.worldEditor?runtime.isCreative:(runtime.currentWorld.gamemode==='creative'),animals:savedAnimals,vehicles:runtime.vehicles.map(v=>({x:v.x,y:v.y,typeId:v.typeId})),activeTpPin:runtime.activeTpPin};if(runtime.isMultiplayer&&runtime.currentWorld.name==="24/7 Official Server"){try{localStorage.setItem('pbr_official_save',JSON.stringify(data));}catch(e){}}else if(runtime.isMultiplayer&&!runtime.isHost){try{localStorage.setItem('pbr_client_save_'+runtime.currentWorld.name,JSON.stringify(data));}catch(e){}}else{if(!runtime.worldSlots.includes(runtime.currentWorld))runtime.worldSlots.push(runtime.currentWorld);runtime.currentWorld.data=data;try{localStorage.setItem('deep-core-saves-v6',JSON.stringify(runtime.worldSlots));}catch(_){}}saveShop();saveGlobalScore();if(!auto){saveMsg.style.opacity='1';setTimeout(()=>{saveMsg.style.opacity='0';},2500);gameContainer.style.filter='brightness(1.2)';setTimeout(()=>{gameContainer.style.filter='none';},140);playSfx('sfx_save');vibrate('medium');}}
 function loadSaves(){try{const s=localStorage.getItem('deep-core-saves-v6');runtime.worldSlots=s?JSON.parse(s):[{name:'Zone Alpha',seed:999}];if(!Array.isArray(runtime.worldSlots)||!runtime.worldSlots.length)runtime.worldSlots=[{name:'Zone Alpha',seed:999}];}catch(_){runtime.worldSlots=[{name:'Zone Alpha',seed:999}];}}
 function isNearStation(stationType){if(!stationType)return true;const pWx=Math.floor(runtime.player.x/TILE),pWy=Math.floor(runtime.player.y/TILE);for(let y=pWy-2;y<=pWy+2;y++)for(let x=pWx-2;x<=pWx+2;x++)if(getTile(x,y)===stationType)return true;return false;}
@@ -2257,7 +2361,7 @@ let rebindingKey=null;
 window.rebind=(action)=>{rebindingKey=action;document.getElementById('bind-'+action).textContent='Press key...';};
 window.addEventListener('keydown',e=>{if(rebindingKey){e.preventDefault();runtime.settings.controls[rebindingKey]=e.key===' '?'Space':e.key;document.getElementById('bind-'+rebindingKey).textContent=runtime.settings.controls[rebindingKey];rebindingKey=null;saveSettings();return;}if(e.target.tagName==='INPUT'||!document.getElementById('vkb-panel').classList.contains('hidden'))return;const key=e.key;const c=runtime.settings.controls||defaultControls;const isMatch=(k,target)=>{if(target==='Space')return k===' ';return k.toLowerCase()===target.toLowerCase();};if(isMatch(key,c.left))runtime.moveInput.left=true;if(isMatch(key,c.right))runtime.moveInput.right=true;if(isMatch(key,c.jump))runtime.moveInput.jump=true;if(isMatch(key,c.armor)){const temp=runtime.selectedItem;runtime.selectedItem=runtime.armorItem;runtime.armorItem=temp;renderInventory();vibrate('light');}if(isMatch(key,c.craft))toggleCrafting();if(isMatch(key,c.ghost))toggleGhostMode();if(isMatch(key,c.place))togglePlaceMode();if(key.toLowerCase()==='v')mountNearestVehicle();if(key.toLowerCase()==='t')cycleActiveTpPin();if(key.toLowerCase()==='m'&&gameState==='PLAYING'){if(runtime.modMaker)exitModMaker(true);else openModMaker();}if(key.toLowerCase()==='b'&&gameState==='PLAYING'){if(runtime.worldEditor)exitWorldEditor(true);else enterWorldEditor();}});
 window.addEventListener('keyup',e=>{if(e.target.tagName==='INPUT'||!document.getElementById('vkb-panel').classList.contains('hidden'))return;const key=e.key;const c=runtime.settings.controls||defaultControls;const isMatch=(k,target)=>{if(target==='Space')return k===' ';return k.toLowerCase()===target.toLowerCase();};if(isMatch(key,c.left))runtime.moveInput.left=false;if(isMatch(key,c.right))runtime.moveInput.right=false;if(isMatch(key,c.jump))runtime.moveInput.jump=false;});
-const ro=new ResizeObserver(entries=>{const rect=entries[0].contentRect;resize(rect);if(!initialized){initialized=true;loadSaves();loadSettings();loadAccount();loadShop();runtime.currentWorld=runtime.worldSlots[0];initVkb();initGame(false);setState('DEVICE_SELECT');ensureAudioBuffers();bgmMenu.play().catch(()=>{});lastTime=performance.now();requestAnimationFrame(gameLoop);}});
+const ro=new ResizeObserver(entries=>{const rect=entries[0].contentRect;resize(rect);if(!initialized){initialized=true;loadSaves();loadSettings();loadAccount();loadShop();runtime.currentWorld=runtime.worldSlots[0];initVkb();initGame(false);ensureAudioBuffers();bgmMenu.play().catch(()=>{});lastTime=performance.now();requestAnimationFrame(gameLoop);startLoadingSequence();}});
 ro.observe(canvas);
 });
 </script>
