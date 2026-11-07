@@ -10,26 +10,29 @@
 <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
 <script>
     const VERSION_MANIFEST_URL = "https://kingelytra1.github.io/Pocket-Block-Realms-2/version.json";
-    const CURRENT_VERSION = "2.4.0"; // Keep this as your local app version
+    const CURRENT_VERSION = "2.4.1"; // Keep this as your local app version
 
     async function initGame() {
         let cachedHtml = localStorage.getItem("cached_game_html");
-        let runningCached = localStorage.getItem("is_running_cached");
 
-        // 1. If we have a cached version and aren't running it yet, load it ONCE smoothly
-        if (cachedHtml && !runningCached) {
-            localStorage.setItem("is_running_cached", "true");
-            document.open();
-            document.write(cachedHtml);
-            document.close();
-            return;
+        // 1. If we have a cached version saved, load it immediately into the DOM
+        if (cachedHtml) {
+            // Prevent running this block endlessly if we just reloaded
+            let isRunningUpdate = sessionStorage.getItem("update_reloaded");
+            if (!isRunningUpdate) {
+                sessionStorage.setItem("update_reloaded", "true");
+                document.open();
+                document.write(cachedHtml);
+                document.close();
+                return;
+            }
         }
 
-        // 2. Otherwise, check GitHub silently in the background while the loading screen shows
-        checkForUpdatesInBackground();
+        // 2. Otherwise, check GitHub for updates while your loading screen displays
+        checkForUpdates();
     }
 
-    async function checkForUpdatesInBackground() {
+    async function checkForUpdates() {
         try {
             let response = await fetch(VERSION_MANIFEST_URL + "?t=" + Date.now());
             if (!response.ok) return;
@@ -37,17 +40,23 @@
 
             let activeVersion = localStorage.getItem("cached_version") || CURRENT_VERSION;
 
+            // If GitHub has a newer version
             if (data.version !== activeVersion) {
                 let codeResponse = await fetch(data.url);
                 let newHtmlContent = await codeResponse.text();
                 
-                // Save for the next time the user opens the app
+                // Save the new code and version
                 localStorage.setItem("cached_game_html", newHtmlContent);
                 localStorage.setItem("cached_version", data.version);
-                localStorage.removeItem("is_running_cached"); // Reset flag so next launch loads the new cache
+                
+                // Clear the session flag so the reload actually triggers the new content
+                sessionStorage.removeItem("update_reloaded");
+
+                // Perform a single, clean full app restart to load the fresh code and audio
+                location.reload();
             }
         } catch (error) {
-            console.log("Running completely offline - using local/cached version");
+            console.log("Offline mode - running current version");
         }
     }
 
