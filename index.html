@@ -10,9 +10,9 @@
 <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
 <script>
     const VERSION_MANIFEST_URL = "https://kingelytra1.github.io/Pocket-Block-Realms-2/version.json";
-    const CURRENT_VERSION = "2.4.1";
+    const CURRENT_VERSION = "2.4.0"; // Keep this as your local app version
 
-    async function checkForUpdates() {
+    async function backgroundUpdateCheck() {
         try {
             let response = await fetch(VERSION_MANIFEST_URL + "?t=" + Date.now());
             if (!response.ok) return;
@@ -21,26 +21,32 @@
             if (data.version !== CURRENT_VERSION) {
                 let codeResponse = await fetch(data.url);
                 let newHtmlContent = await codeResponse.text();
+                
+                // Save it for the next launch
                 localStorage.setItem("cached_game_html", newHtmlContent);
                 localStorage.setItem("cached_version", data.version);
-                location.reload();
             }
         } catch (error) {
-            console.log("Running offline version");
+            console.log("No internet or offline mode");
         }
     }
 
     window.onload = async () => {
-        await checkForUpdates();
         let cachedHtml = localStorage.getItem("cached_game_html");
-        if (cachedHtml) {
+        
+        // Use sessionStorage to ensure it only loads the cache ONCE per app launch
+        if (cachedHtml && !sessionStorage.getItem("cache_loaded")) {
+            sessionStorage.setItem("cache_loaded", "true");
             document.open();
             document.write(cachedHtml);
             document.close();
+            return;
         }
+
+        // Run background check for future updates
+        backgroundUpdateCheck();
     };
 </script>
-
 <style>
 html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #0f172a; font-family: 'Fredoka', sans-serif; }
 canvas { display: block; touch-action: none; width: 100%; height: 100%; }
@@ -233,7 +239,7 @@ input[type="color"]::-webkit-color-swatch { border: 2px solid rgba(255,255,255,0
         </div>
         <div class="glass rounded-xl p-2 flex gap-2 overflow-x-auto items-center justify-between">
           <div class="flex gap-2">
-            <button id="single-player-btn" class="px-3 py-1 rounded bg-slate-700 text-white text-xs font-bold whitespace-nowrap border border-slate-600 min-h-[44px]">Worlds</button>
+            <button id="single-player-btn" class="px-3 py-1 rounded bg-slate-700 text-white text-xs font-bold whitespace-nowrap border border-slate-600 min-h-[44px]">🌏Worlds</button>
             <button id="craft-btn" class="px-3 py-1 rounded bg-amber-700 text-white text-xs font-bold whitespace-nowrap border border-amber-600 min-h-[44px]">CRAFT</button>
             <button id="shop-btn" class="px-3 py-1 rounded bg-yellow-600 text-white text-xs font-bold whitespace-nowrap border border-amber-400/50 min-h-[44px]">🛒 SHOP</button>
             <button id="village-btn" class="px-3 py-1 rounded bg-green-700 text-white text-xs font-bold whitespace-nowrap border border-green-600 min-h-[44px]">VILLAGE</button>
